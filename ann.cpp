@@ -19,7 +19,9 @@ public:
 
     // Hàm khởi tạo ngẫu nhiên
     void randomize();
+    void initialBias();
     void normalize();
+
 
     // Các phép toán ma trận
     Matrix transpose();
@@ -69,6 +71,15 @@ void Matrix::randomize() {
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             data[i][j] = dis(gen);
+        }
+    }
+}
+
+// Hàm khởi tạo ngẫu nhiên
+void Matrix::initialBias() {
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            data[i][j] = 0.01;
         }
     }
 }
@@ -154,27 +165,21 @@ void Matrix::applyReLUDerivative() {
     }
 }
 
-
 // Hàm Softmax
 void Matrix::applySoftmax() {
     for (int i = 0; i < rows; i++) {
-        // Find max for numerical stability
         double max_val = data[i][0];
         for (int j = 1; j < cols; j++) {
             max_val = max(max_val, data[i][j]);
         }
 
-        // Compute exp and sum
         double sum_exp = 0.0;
-        vector<double> exp_values(cols);
         for (int j = 0; j < cols; j++) {
-            exp_values[j] = exp(data[i][j] - max_val);
-            sum_exp += exp_values[j];
+            sum_exp += exp(data[i][j] - max_val);
         }
 
-        // Normalize
         for (int j = 0; j < cols; j++) {
-            data[i][j] = exp_values[j] / sum_exp;
+            data[i][j] = exp(data[i][j] - max_val) / sum_exp;
         }
     }
 }
@@ -208,20 +213,14 @@ int Matrix::argmax(int row) const {
 
 // Tính Cross-Entropy Loss
 Matrix crossEntropyLossMatrix(const Matrix& predictions, const Matrix& targets) {
-    double epsilon = 1e-15; // Small value to avoid log(0)
-    Matrix loss(predictions.rows, 1); // Change to store one loss value per sample
-
+    double epsilon = 1e-15; // Small value to prevent log(0)
+    Matrix loss(predictions.rows, predictions.cols);
     for (int i = 0; i < predictions.rows; ++i) {
-        double sample_loss = 0.0;
         for (int j = 0; j < predictions.cols; ++j) {
-            // Clip prediction values to avoid numerical instability
-            double pred = std::max(epsilon, std::min(predictions.data[i][j], 1.0 - epsilon));
-            // Cross entropy for each class
-            if (targets.data[i][j] > 0) { // Only calculate for the true class
-                sample_loss -= targets.data[i][j] * log(pred);
-            }
+            double pred = predictions.data[i][j];
+            double target = targets.data[i][j];
+            loss.data[i][j] = target * log(pred + epsilon);
         }
-        loss.data[i][0] = sample_loss;
     }
     return loss;
 }
@@ -236,13 +235,17 @@ public:
         : W1(input_size, hidden_size1), b1(batch_size, hidden_size1),
         W_hidden2(hidden_size1, hidden_size2), b_hidden2(batch_size, hidden_size2),
         W2(hidden_size2, output_size), b2(batch_size, output_size) {
+
         W1.randomize();
+        b1.initialBias();
         
 
         W_hidden2.randomize();
-        //b_hidden2.randomize();
+        b_hidden2.initialBias();
 
         W2.randomize();
+
+
    
     }
 
@@ -320,6 +323,8 @@ void NeuralNetwork::train(const Matrix& input, const Matrix& target, double lear
 
     }
 }
+
+
 
 void loadData(const string& filename, Matrix& X, Matrix& Y, int sample) {
     try {
@@ -482,7 +487,7 @@ int main() {
     int hidden_size1 = 128;
     int hidden_size2 = 128;
     int output_size = 10;  // 10 lớp cho 10 nhãn
-    int batch_size = 60000;
+    int batch_size = 1000;
 
     Matrix X_train(batch_size, input_size);  // Tập huấn luyện (60000 ảnh)
     Matrix Y_train(batch_size, output_size); // Nhãn tương ứng
@@ -495,11 +500,11 @@ int main() {
     // Tạo và huấn luyện mạng
     
     NeuralNetwork nn(input_size, hidden_size1,hidden_size2, output_size, batch_size);
-    nn.train(X_train, Y_train, 0.0001, 3);
+    nn.train(X_train, Y_train, 0.001, 20);
     
-    saveModel(nn, "saved_model.txt");
+    //saveModel(nn, "saved_model.txt");
 
-    batch_size = 10000;
+    batch_size = 1000;
     // Testing model
     Matrix X_test(batch_size, input_size);  // 10000 ảnh kiểm tra
     Matrix Y_test(batch_size, output_size);
@@ -507,10 +512,10 @@ int main() {
     loadData("fashion-mnist_test.csv", X_test, Y_test, batch_size);
 
     // Tải mô hình và đánh giá
-    NeuralNetwork nnTest(input_size, hidden_size1, hidden_size2, output_size, batch_size);
-    loadModel(nnTest, "saved_model.txt");
+    //NeuralNetwork nnTest(input_size, hidden_size1, hidden_size2, output_size, batch_size);
+    //loadModel(nnTest, "saved_model.txt");
 
-    evaluate(nnTest, X_test, Y_test);
+    evaluate(nn, X_test, Y_test);
 
     return 0;
 }
