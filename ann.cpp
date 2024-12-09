@@ -20,7 +20,6 @@ public:
     // Hàm khởi tạo ngẫu nhiên
     void randomize();
     void initialBias();
-    void normalize();
 
 
     // Các phép toán ma trận
@@ -28,7 +27,9 @@ public:
     Matrix add(const Matrix& other) const;
     Matrix subtract(const Matrix& other) const;
     Matrix multiply(const Matrix& other) const;
+    Matrix multiplyGrad(const Matrix& other,int m) const;
     Matrix scalarMultiply(double scalar) const;
+    Matrix updateBias(int m) const;
     int argmax(int row) const;
 
     // Hàm kích hoạt ReLU
@@ -50,27 +51,20 @@ Matrix::Matrix(int rows, int cols) {
     data.resize(rows, vector<double>(cols, 0));
 }
 
-void Matrix::normalize() {
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            data[i][j] /= 255.0;  // Chuyển đổi pixel sang phạm vi [0, 1]
-        }
-    }
-}
+
 
 // Hàm khởi tạo ngẫu nhiên
 void Matrix::randomize() {
     random_device rd;
     mt19937 gen(rd());
 
-    // Áp dụng He Initialization cho mỗi lớp
-    double bound = sqrt(2.0 / rows);  // rows là số lượng neuron đầu vào của lớp
-
-    uniform_real_distribution<> dis(-bound, bound);
+    // He initialization
+    double scale = sqrt(2.0 / rows);
+    normal_distribution<double> d(0, scale);
 
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            data[i][j] = dis(gen);
+            data[i][j] = d(gen);
         }
     }
 }
@@ -100,9 +94,10 @@ Matrix Matrix::add(const Matrix& other) const {
         throw invalid_argument("Matrix dimensions must match or the other matrix must have one row for broadcasting.");
     }
     Matrix result(rows, cols);
+
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
-            result.data[i][j] = data[i][j] + other.data[i % other.rows][j];
+            result.data[i][j] = data[i][j] + other.data[0][j];
         }
     }
     return result;
@@ -124,9 +119,14 @@ Matrix Matrix::subtract(const Matrix& other) const {
 
 // Hàm nhân ma trận
 Matrix Matrix::multiply(const Matrix& other) const {
+    if (cols != other.rows) {
+        throw invalid_argument("Matrix dimensions do not match for multiplication.");
+    }
+
     Matrix result(rows, other.cols);
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < other.cols; j++) {
+            result.data[i][j] = 0; // Initialize the result cell
             for (int k = 0; k < cols; k++) {
                 result.data[i][j] += data[i][k] * other.data[k][j];
             }
@@ -134,6 +134,41 @@ Matrix Matrix::multiply(const Matrix& other) const {
     }
     return result;
 }
+
+// Hàm nhân ma trận để tính gradient
+Matrix Matrix::multiplyGrad(const Matrix& other, int m ) const {
+    if (cols != other.rows) {
+        throw invalid_argument("Matrix dimensions do not match for multiplication.");
+    }
+
+    Matrix result(rows, other.cols);
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < other.cols; j++) {
+            result.data[i][j] = 0; // Initialize the result cell
+            for (int k = 0; k < cols; k++) {
+                result.data[i][j] += data[i][k] * other.data[k][j];
+            }
+            result.data[i][j] /= m;
+        }
+    }
+    return result;
+}
+
+// Hàm Update bias
+Matrix Matrix::updateBias(int m) const {
+    Matrix result(1, cols);
+
+    for (int j = 0; j < cols; j++) {
+        double sumCols = 0.0;
+        for (int i = 0; i < rows; i++) {
+            sumCols += data[i][j]; // Cộng các phần tử trong cột j
+        }
+        // Gán giá trị tổng chia cho số hàng (rows) vào ma trận kết quả
+        result.data[0][j] = sumCols / m;
+    }
+    return result;
+}
+
 
 // Hàm nhân với số vô hướng
 Matrix Matrix::scalarMultiply(double scalar) const {
@@ -212,17 +247,41 @@ int Matrix::argmax(int row) const {
 
 
 // Tính Cross-Entropy Loss
-Matrix crossEntropyLossMatrix(const Matrix& predictions, const Matrix& targets) {
-    double epsilon = 1e-15; // Small value to prevent log(0)
-    Matrix loss(predictions.rows, predictions.cols);
-    for (int i = 0; i < predictions.rows; ++i) {
-        for (int j = 0; j < predictions.cols; ++j) {
-            double pred = predictions.data[i][j];
-            double target = targets.data[i][j];
-            loss.data[i][j] = target * log(pred + epsilon);
+double crossEntropyLoss(const Matrix& predictions, const Matrix& targets) {
+    double loss = 0.0;
+    for (int i = 0; i < targets.rows; i++) {
+        // Find the index of the maximum value in the target (one-hot encoded)
+        int targetIndex = 0;
+        for (int j = 1; j < targets.cols; j++) {
+            if (targets.data[i][j] > targets.data[i][targetIndex]) {
+                targetIndex = j;
+            }
+        }
+
+        // Compute the log likelihood
+        double logLikelihood = -log(predictions.data[i][targetIndex]);
+        loss += logLikelihood;
+    }
+
+    // Return the average loss over all samples
+    return loss / targets.rows;
+}
+
+// Modified average loss calculation in train method
+double calculateAverageLoss(const Matrix& lossMatrix) {
+    double totalLoss = 0.0;
+    int count = 0;
+
+    for (int i = 0; i < lossMatrix.rows; ++i) {
+        for (int j = 0; j < lossMatrix.cols; ++j) {
+            if (lossMatrix.data[i][j] != 0) { // Only count non-zero losses
+                totalLoss -= lossMatrix.data[i][j];
+                count++;
+            }
         }
     }
-    return loss;
+
+    return count > 0 ? totalLoss / count : 0.0;
 }
 
 
@@ -232,16 +291,16 @@ public:
     int batch_size;
 
     NeuralNetwork(int input_size, int hidden_size1, int hidden_size2, int output_size, int batch_size)
-        : W1(input_size, hidden_size1), b1(batch_size, hidden_size1),
-        W_hidden2(hidden_size1, hidden_size2), b_hidden2(batch_size, hidden_size2),
-        W2(hidden_size2, output_size), b2(batch_size, output_size) {
+        : W1(input_size, hidden_size1), b1(1, hidden_size1),
+        W_hidden2(hidden_size1, hidden_size2), b_hidden2(1, hidden_size2),
+        W2(hidden_size2, output_size), b2(1, output_size) {
 
         W1.randomize();
-        b1.initialBias();
+        //b1.initialBias();
         
 
         W_hidden2.randomize();
-        b_hidden2.initialBias();
+        //b_hidden2.initialBias();
 
         W2.randomize();
 
@@ -254,7 +313,8 @@ public:
 
 void NeuralNetwork::train(const Matrix& input, const Matrix& target, double learning_rate, int epochs) {
     Matrix X = input;  // Copy dữ liệu vào một biến mới
-    X.normalize();      // Chuẩn hóa dữ liệu đầu vào
+
+    int m = X.rows;
 
     for (int epoch = 0; epoch < epochs; epoch++) {
         // Forward pass
@@ -271,16 +331,8 @@ void NeuralNetwork::train(const Matrix& input, const Matrix& target, double lear
         Z2.applySoftmax();
 
         // Tính mất mát
-        Matrix lossMatrix = crossEntropyLossMatrix(Z2, target);
-        // Calculate the average loss
-        double averageLoss = 0.0;
-        for (int i = 0; i < lossMatrix.rows; ++i) {
-            for (int j = 0; j < lossMatrix.cols; ++j) {
-                averageLoss -= lossMatrix.data[i][j];
-            }
-        }
-        averageLoss /= lossMatrix.rows;
-
+        double loss = crossEntropyLoss(Z2, target);
+      
         // Tính độ chính xác
         int correct_predictions = 0;
         for (int i = 0; i < Z2.rows; i++) {
@@ -291,27 +343,27 @@ void NeuralNetwork::train(const Matrix& input, const Matrix& target, double lear
         }
         double accuracy = static_cast<double>(correct_predictions) / Z2.rows;
 
-        cout << "Epoch " << epoch << ", Loss: " << averageLoss << ", Accuracy: " << accuracy * 100 << "%" << endl;
+        cout << "Epoch " << epoch << ", Loss: " << loss << ", Accuracy: " << accuracy * 100 << "%" << endl;
    
 
        // Backpropagation
-        Matrix dZ_output = lossMatrix; // Gradient tại output layer
-        Matrix dW_output = Z2_hidden.transpose().multiply(dZ_output);
-        Matrix db_output = dZ_output;
+        Matrix dZ_output = Z2.subtract(target); // Gradient tại output layer
+        Matrix dW_output = Z2_hidden.transpose().multiplyGrad(dZ_output,m);
+        Matrix db_output = dZ_output.updateBias(m);
 
         // Gradient tại hidden layer 2
-        Matrix dZ_hidden2 = dZ_output.multiply(W2.transpose());
+        Matrix dZ_hidden2 = dZ_output.multiplyGrad(W2.transpose(),m);
         dZ_hidden2.applyReLUDerivative();
 
-        Matrix dW_hidden2 = Z1.transpose().multiply(dZ_hidden2);
-        Matrix db_hidden2 = dZ_hidden2;
+        Matrix dW_hidden2 = Z1.transpose().multiplyGrad(dZ_hidden2,m);
+        Matrix db_hidden2 = dZ_hidden2.updateBias(m);
 
         // Gradient tại hidden layer 1
-        Matrix dZ_hidden1 = dZ_hidden2.multiply(W_hidden2.transpose());
+        Matrix dZ_hidden1 = dZ_hidden2.multiplyGrad(W_hidden2.transpose(),m);
         dZ_hidden1.applyReLUDerivative();
 
-        Matrix dW_hidden1 = X.transpose().multiply(dZ_hidden1);
-        Matrix db_hidden1 = dZ_hidden1;
+        Matrix dW_hidden1 = X.transpose().multiplyGrad(dZ_hidden1,m);
+        Matrix db_hidden1 = dZ_hidden1.updateBias(m);
 
         // Cập nhật trọng số và bias
         W1 = W1.subtract(dW_hidden1.scalarMultiply(learning_rate));
@@ -377,7 +429,7 @@ void loadData(const string& filename, Matrix& X, Matrix& Y, int sample) {
 
             for (int i = 0; i < X.cols; ++i) {
                 
-                X.data[row][i] = image_pixels[i];
+                X.data[row][i] = image_pixels[i] / 255.0;
             }
 
             ++row;
@@ -452,7 +504,6 @@ void loadModel(NeuralNetwork& nn, const string& filename) {
 
 void predict(const NeuralNetwork& nn, const Matrix& input, Matrix& output) {
     Matrix X = input;
-    X.normalize();
 
     // Forward pass
     Matrix Z1 = X.multiply(nn.W1).add(nn.b1);
@@ -487,7 +538,7 @@ int main() {
     int hidden_size1 = 128;
     int hidden_size2 = 128;
     int output_size = 10;  // 10 lớp cho 10 nhãn
-    int batch_size = 1000;
+    int batch_size = 200;
 
     Matrix X_train(batch_size, input_size);  // Tập huấn luyện (60000 ảnh)
     Matrix Y_train(batch_size, output_size); // Nhãn tương ứng
@@ -500,11 +551,11 @@ int main() {
     // Tạo và huấn luyện mạng
     
     NeuralNetwork nn(input_size, hidden_size1,hidden_size2, output_size, batch_size);
-    nn.train(X_train, Y_train, 0.001, 20);
+    nn.train(X_train, Y_train, 0.01, 100);
     
     //saveModel(nn, "saved_model.txt");
 
-    batch_size = 1000;
+    batch_size = 200;
     // Testing model
     Matrix X_test(batch_size, input_size);  // 10000 ảnh kiểm tra
     Matrix Y_test(batch_size, output_size);
