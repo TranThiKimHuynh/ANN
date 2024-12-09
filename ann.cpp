@@ -33,13 +33,13 @@ public:
     int argmax(int row) const;
 
     // Hàm kích hoạt ReLU
-    void applyReLU();
+    Matrix applyReLU();
 
     // Đạo hàm hàm kích hoạt ReLU
-    void applyReLUDerivative();
+    Matrix applyReLUDerivative();
 
     // Hàm Softmax
-    void applySoftmax();
+    Matrix applySoftmax();
 
     // In ma trận
     void print() const;
@@ -119,20 +119,35 @@ Matrix Matrix::subtract(const Matrix& other) const {
 
 // Hàm nhân ma trận
 Matrix Matrix::multiply(const Matrix& other) const {
-    if (cols != other.rows) {
-        throw invalid_argument("Matrix dimensions do not match for multiplication.");
-    }
+    
 
-    Matrix result(rows, other.cols);
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < other.cols; j++) {
-            result.data[i][j] = 0; // Initialize the result cell
-            for (int k = 0; k < cols; k++) {
-                result.data[i][j] += data[i][k] * other.data[k][j];
+
+    if (cols == other.cols && rows == other.rows) {
+        Matrix result(rows, cols);
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {              
+                result.data[i][j] = data[i][j] * other.data[i][j];
+              
             }
         }
+        return result;
+
     }
-    return result;
+    else {
+        Matrix result(rows, other.cols);
+
+        for (int i = 0; i < rows; i++) {
+
+            for (int j = 0; j < other.cols; j++) {
+                result.data[i][j] = 0; // Initialize the result cell
+                for (int k = 0; k < cols; k++) {
+                    result.data[i][j] += data[i][k] * other.data[k][j];
+                }
+            }
+        }
+        return result;
+    }
+   
 }
 
 // Hàm nhân ma trận để tính gradient
@@ -182,26 +197,31 @@ Matrix Matrix::scalarMultiply(double scalar) const {
 }
 
 // Hàm ReLU
-void Matrix::applyReLU() {
+ Matrix Matrix::applyReLU() {
+    Matrix result(rows, cols);
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            data[i][j] = max(0.0, data[i][j]);
+            result.data[i][j] = max(0.0, data[i][j]);
         }
     }
+    return result;
 }
 
 // Đạo hàm ReLU
-void Matrix::applyReLUDerivative() {
+Matrix Matrix::applyReLUDerivative() {
+    Matrix result(rows, cols);
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
             // Áp dụng đạo hàm ReLU: nếu giá trị > 0, đạo hàm = 1, nếu <= 0, đạo hàm = 0
-            data[i][j] = data[i][j] > 0 ? 1.0 : 0.0;
+            result.data[i][j] = data[i][j] > 0 ? 1.0 : 0.0;
         }
     }
+    return result;
 }
 
 // Hàm Softmax
-void Matrix::applySoftmax() {
+Matrix Matrix::applySoftmax() {
+    Matrix result(rows, cols);
     for (int i = 0; i < rows; i++) {
         double max_val = data[i][0];
         for (int j = 1; j < cols; j++) {
@@ -214,10 +234,12 @@ void Matrix::applySoftmax() {
         }
 
         for (int j = 0; j < cols; j++) {
-            data[i][j] = exp(data[i][j] - max_val) / sum_exp;
+            result.data[i][j] = exp(data[i][j] - max_val) / sum_exp;
         }
     }
+    return result;
 }
+
 // In ma trận
 void Matrix::print() const {
     for (int i = 0; i < rows; i++) {
@@ -287,92 +309,72 @@ double calculateAverageLoss(const Matrix& lossMatrix) {
 
 class NeuralNetwork {
 public:
-    Matrix W1, b1, W_hidden2, b_hidden2, W2, b2;
-    int batch_size;
+    Matrix W1, b1, W2, b2, W3, b3;
 
-    NeuralNetwork(int input_size, int hidden_size1, int hidden_size2, int output_size, int batch_size)
+    NeuralNetwork(int input_size, int hidden_size1, int hidden_size2, int output_size)
         : W1(input_size, hidden_size1), b1(1, hidden_size1),
-        W_hidden2(hidden_size1, hidden_size2), b_hidden2(1, hidden_size2),
-        W2(hidden_size2, output_size), b2(1, output_size) {
+        W2(hidden_size1, hidden_size2), b2(1, hidden_size2),
+        W3(hidden_size2, output_size), b3(1, output_size) {
 
         W1.randomize();
-        //b1.initialBias();
-        
-
-        W_hidden2.randomize();
-        //b_hidden2.initialBias();
-
         W2.randomize();
-
-
-   
+        W3.randomize();
     }
 
     void train(const Matrix& input, const Matrix& target, double learning_rate, int epochs);
 };
-
 void NeuralNetwork::train(const Matrix& input, const Matrix& target, double learning_rate, int epochs) {
-    Matrix X = input;  // Copy dữ liệu vào một biến mới
-
-    int m = X.rows;
-
+    int m = input.rows;
+    Matrix X = input;
     for (int epoch = 0; epoch < epochs; epoch++) {
-        // Forward pass
-        // Lớp ẩn đầu tiên
-        Matrix Z1 = X.multiply(W1).add(b1);
-        Z1.applyReLU();
+        // Forward propagation like Python
+        Matrix Z1 = input.multiply(W1).add(b1);
+        Matrix A1 = Z1.applyReLU();
 
-        // Lớp ẩn thứ hai
-        Matrix Z2_hidden = Z1.multiply(W_hidden2).add(b_hidden2);
-        Z2_hidden.applyReLU();
+        Matrix Z2 = A1.multiply(W2).add(b2);
+        Matrix A2 = Z2.applyReLU();
 
-        // Lớp đầu ra
-        Matrix Z2 = Z2_hidden.multiply(W2).add(b2);
-        Z2.applySoftmax();
+        Matrix Z3 = A2.multiply(W3).add(b3);
+        Matrix A3 = Z3.applySoftmax();
 
-        // Tính mất mát
-        double loss = crossEntropyLoss(Z2, target);
+        // Calculate loss
+        double loss = crossEntropyLoss(A3, target);
+
+        // Backpropagation matching Python implementation
+        Matrix dZ3 = A3.subtract(target).scalarMultiply(loss); // Include loss scaling
+        Matrix dW3 = A2.transpose().multiplyGrad(dZ3, m);
+        Matrix db3 = dZ3.updateBias(m);
+
       
-        // Tính độ chính xác
-        int correct_predictions = 0;
-        for (int i = 0; i < Z2.rows; i++) {
+  
+        Matrix dA2 = dZ3.multiply(W3.transpose());
+        Matrix T = Z2.applyReLUDerivative();
+        Matrix dZ2 = dA2.multiply(T);
 
-            if (Z2.argmax(i) == target.argmax(i)) {
-                correct_predictions++;
-            }
+        Matrix dW2 = A1.transpose().multiplyGrad(dZ2,m);
+        Matrix db2 = dZ2.updateBias(m);
+
+        Matrix dA1 = dZ2.multiply(W2.transpose());
+        Matrix dZ1 = dA1.multiply(Z1.applyReLUDerivative());
+        Matrix dW1 = X.transpose().multiplyGrad(dZ1,m);
+        Matrix db1 = dZ1.updateBias(m);
+
+        // Update weights with learning rate decay
+        //double current_lr = learning_rate / (1 + 0.1 * epoch);
+        W1 = W1.subtract(dW1.scalarMultiply(learning_rate));
+        b1 = b1.subtract(db1.scalarMultiply(learning_rate));
+        W2 = W2.subtract(dW2.scalarMultiply(learning_rate));
+        b2 = b2.subtract(db2.scalarMultiply(learning_rate));
+        W3 = W3.subtract(dW3.scalarMultiply(learning_rate));
+        b3 = b3.subtract(db3.scalarMultiply(learning_rate));
+
+        // Calculate and print accuracy
+        int correct = 0;
+        for (int i = 0; i < A3.rows; i++) {
+            if (A3.argmax(i) == target.argmax(i)) correct++;
         }
-        double accuracy = static_cast<double>(correct_predictions) / Z2.rows;
-
-        cout << "Epoch " << epoch << ", Loss: " << loss << ", Accuracy: " << accuracy * 100 << "%" << endl;
-   
-
-       // Backpropagation
-        Matrix dZ_output = Z2.subtract(target); // Gradient tại output layer
-        Matrix dW_output = Z2_hidden.transpose().multiplyGrad(dZ_output,m);
-        Matrix db_output = dZ_output.updateBias(m);
-
-        // Gradient tại hidden layer 2
-        Matrix dZ_hidden2 = dZ_output.multiplyGrad(W2.transpose(),m);
-        dZ_hidden2.applyReLUDerivative();
-
-        Matrix dW_hidden2 = Z1.transpose().multiplyGrad(dZ_hidden2,m);
-        Matrix db_hidden2 = dZ_hidden2.updateBias(m);
-
-        // Gradient tại hidden layer 1
-        Matrix dZ_hidden1 = dZ_hidden2.multiplyGrad(W_hidden2.transpose(),m);
-        dZ_hidden1.applyReLUDerivative();
-
-        Matrix dW_hidden1 = X.transpose().multiplyGrad(dZ_hidden1,m);
-        Matrix db_hidden1 = dZ_hidden1.updateBias(m);
-
-        // Cập nhật trọng số và bias
-        W1 = W1.subtract(dW_hidden1.scalarMultiply(learning_rate));
-        b1 = b1.subtract(db_hidden1.scalarMultiply(learning_rate));
-        W_hidden2 = W_hidden2.subtract(dW_hidden2.scalarMultiply(learning_rate));
-        b_hidden2 = b_hidden2.subtract(db_hidden2.scalarMultiply(learning_rate));
-        W2 = W2.subtract(dW_output.scalarMultiply(learning_rate));
-        b2 = b2.subtract(db_output.scalarMultiply(learning_rate));
-
+        double accuracy = static_cast<double>(correct) / A3.rows * 100;
+        cout << "Epoch " << epoch << ", Loss: " << loss << ", Accuracy: " << accuracy << "%" << endl;
     }
 }
 
@@ -465,10 +467,10 @@ void saveModel(const NeuralNetwork& nn, const string& filename) {
 
     saveMatrix(nn.W1);
     saveMatrix(nn.b1);
-    saveMatrix(nn.W_hidden2);
-    saveMatrix(nn.b_hidden2);
     saveMatrix(nn.W2);
     saveMatrix(nn.b2);
+    saveMatrix(nn.W3);
+    saveMatrix(nn.b3);
 
     file.close();
     cout << "Model saved to " << filename << endl;
@@ -493,29 +495,27 @@ void loadModel(NeuralNetwork& nn, const string& filename) {
 
     loadMatrix(nn.W1);
     loadMatrix(nn.b1);
-    loadMatrix(nn.W_hidden2);
-    loadMatrix(nn.b_hidden2);
     loadMatrix(nn.W2);
     loadMatrix(nn.b2);
+    loadMatrix(nn.W3);
+    loadMatrix(nn.b3);
 
     file.close();
     cout << "Model loaded from " << filename << endl;
 }
 
 void predict(const NeuralNetwork& nn, const Matrix& input, Matrix& output) {
-    Matrix X = input;
 
-    // Forward pass
-    Matrix Z1 = X.multiply(nn.W1).add(nn.b1);
-    Z1.applyReLU();
+    Matrix Z1 = input.multiply(nn.W1).add(nn.b1);
+    Matrix A1 = Z1.applyReLU();
 
-    Matrix Z2_hidden = Z1.multiply(nn.W_hidden2).add(nn.b_hidden2);
-    Z2_hidden.applyReLU();
+    Matrix Z2 = A1.multiply(nn.W2).add(nn.b2);
+    Matrix A2 = Z2.applyReLU();
 
-    Matrix Z2 = Z2_hidden.multiply(nn.W2).add(nn.b2);
-    Z2.applySoftmax();
+    Matrix Z3 = A2.multiply(nn.W3).add(nn.b3);
+    Matrix A3 = Z3.applySoftmax();
 
-    output = Z2;
+    output = A3;
 }
 
 void evaluate(const NeuralNetwork& nn, const Matrix& X_test, const Matrix& Y_test) {
@@ -538,7 +538,7 @@ int main() {
     int hidden_size1 = 128;
     int hidden_size2 = 128;
     int output_size = 10;  // 10 lớp cho 10 nhãn
-    int batch_size = 200;
+    int batch_size = 1000;
 
     Matrix X_train(batch_size, input_size);  // Tập huấn luyện (60000 ảnh)
     Matrix Y_train(batch_size, output_size); // Nhãn tương ứng
@@ -550,12 +550,12 @@ int main() {
     cout << "Y_train shape: " << Y_train.rows << " " << Y_train.cols << endl;
     // Tạo và huấn luyện mạng
     
-    NeuralNetwork nn(input_size, hidden_size1,hidden_size2, output_size, batch_size);
-    nn.train(X_train, Y_train, 0.01, 100);
+    NeuralNetwork nn(input_size, hidden_size1,hidden_size2, output_size);
+    nn.train(X_train, Y_train, 0.1, 30);
     
     //saveModel(nn, "saved_model.txt");
 
-    batch_size = 200;
+    batch_size = 1000;
     // Testing model
     Matrix X_test(batch_size, input_size);  // 10000 ảnh kiểm tra
     Matrix Y_test(batch_size, output_size);
